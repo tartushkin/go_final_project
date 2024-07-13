@@ -1,7 +1,8 @@
 package main
 
 import (
-	//"go_final_project/tests"
+	"go_final_project/internal/http"
+	"go_final_project/internal/myDB"
 	"os"
 	"strconv"
 
@@ -11,7 +12,6 @@ import (
 )
 
 func main() {
-
 	//инициализация экземпляра echo и middleware
 	e := echo.New()
 	e.Use(middleware.Logger())
@@ -20,24 +20,39 @@ func main() {
 	//инициализация логов
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
+	logrus.SetOutput(os.Stdout)
+	logrus.SetLevel(logrus.InfoLevel)
 
 	// Получаем значение порта из переменной окружения TODO_PORT
 	port := os.Getenv("TODO_PORT")
 	if port == "" {
-		// Если переменная окружения не установлена, используем порт по умолчанию 7540
+		// Если переменная окружения нет, используем порт по умолчанию 7540
 		port = ":7540"
 	} else {
-		// Добавляем двоеточие
 		if _, err := strconv.Atoi(port); err == nil {
 			port = ":" + port
 		}
 	}
 
-	//инициализация репо для раюоты c базой
+	dbFile := os.Getenv("TODO_DBFILE")
+	if dbFile == "" {
+		// Use default path if TODO_DBFILE is not set
+		dbFile = "./scheduler.db"
+	}
+
+	//инициализация репо для работы c базой
+	db, err := myDB.NewDB()
+	if err != nil {
+		logger.Fatalf("Ошбка инициализации базы данных: %v", err)
+	}
+	defer db.Close()
 
 	// Настройка статических файлов
 	webDir := "./web"
 	e.Static("/", webDir)
+
+	// Регистрация маршрутов
+	http.RegisterHandlers(e, db)
 
 	//Запуск сервера в горутине
 	go func() {
@@ -45,7 +60,7 @@ func main() {
 			logger.Fatalf("Ошибка запуска сервера %v", err)
 		}
 	}()
-	logger.Info("Cервер успешно запущен на порту :7540")
-	//блокирум горутину
+	logger.Info("Cервер успешно запущен на порту " + port)
+	//блокируем горутину
 	select {}
 }
