@@ -1,9 +1,5 @@
 package app
 
-import (
-	"github.com/gocraft/dbr/v2"
-)
-
 // Модель
 type Models struct {
 	ID      int    `json:"id"        db:"id"`
@@ -17,9 +13,11 @@ const (
 	FormatDate = "20060102"
 )
 
-type DBSession interface {
-	Select(columns ...string) *dbr.SelectStmt
-	InsertInto(table string) *dbr.InsertStmt
-	Update(table string) *dbr.UpdateStmt
-	DeleteFrom(table string) *dbr.DeleteStmt
+type DBHandler interface {
+	AddTask(task Models) (int64, error)
+	DeleteTask(id int) error
+	GetTaskByID(id int) (*Models, error)
+	GetTasks(search string) ([]Models, error)
+	UpdateTask(task Models) (int64, error)
+	MarkTaskAsDone(task Models, nextDate string) error
 }

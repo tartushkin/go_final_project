@@ -1,10 +1,11 @@
 package main
 
 import (
+	"go_final_project/internal/db"
 	"go_final_project/internal/http"
-	"go_final_project/internal/myDB"
 	"os"
 	"strconv"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -12,6 +13,7 @@ import (
 )
 
 func main() {
+	var wg sync.WaitGroup
 	//инициализация экземпляра echo и middleware
 	e := echo.New()
 	e.Use(middleware.Logger())
@@ -41,7 +43,7 @@ func main() {
 	}
 
 	//инициализация репо для работы c базой
-	db, err := myDB.NewDB()
+	db, err := db.NewDB()
 	if err != nil {
 		logger.Fatalf("Ошбка инициализации базы данных: %v", err)
 	}
@@ -55,12 +57,14 @@ func main() {
 	http.RegisterHandlers(e, db)
 
 	//Запуск сервера в горутине
+	wg.Add(1) // Увеличиваем счетчик WaitGroup
 	go func() {
+		defer wg.Done() // Уменьшаем счетчик при завершении горутины
 		if err := e.Start(port); err != nil {
 			logger.Fatalf("Ошибка запуска сервера %v", err)
 		}
 	}()
 	logger.Info("Cервер успешно запущен на порту " + port)
 	//блокируем горутину
-	select {}
+	wg.Wait()
 }

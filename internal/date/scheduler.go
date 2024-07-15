@@ -1,7 +1,8 @@
-package logic
+package date
 
 import (
 	"fmt"
+	"go_final_project/internal/app"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ func CalculateNextDate(now time.Time, date string, repeat string) (string, error
 	}
 
 	// Парсим исходную дату
-	taskDate, err := time.Parse("20060102", date)
+	taskDate, err := time.Parse(app.FormatDate, date)
 	if err != nil {
 		return "", fmt.Errorf("некорректная дата: %v", err)
 	}
