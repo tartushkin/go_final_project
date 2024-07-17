@@ -9,95 +9,59 @@ import (
 )
 
 // CalculateNextDate вычисляет следующую дату для задачи в соответствии с указанным правилом.
-func CalculateNextDate(now time.Time, date string, repeat string) (string, error) {
+func CalculateNextDate(now time.Time, dateStr string, repeat string) (string, error) {
 	if repeat == "" {
-		return "", fmt.Errorf("пустое правило повторения")
+		return "", fmt.Errorf("Правило повторения не указано")
 	}
 
-	// Парсим исходную дату
-	taskDate, err := time.Parse(app.FormatDate, date)
+	date, err := time.Parse(app.FormatDate, dateStr)
 	if err != nil {
-		return "", fmt.Errorf("некорректная дата: %v", err)
+		return "", fmt.Errorf("Неверный формат даты: %v", err)
 	}
 
-	// Обрабатываем правила повторения
-	switch {
-	case repeat == "y":
-		// Ежегодное повторение
-		for taskDate.Before(now) {
-			taskDate = taskDate.AddDate(1, 0, 0)
+	parts := strings.Fields(repeat)
+	rule := parts[0]
+
+	var resultDate time.Time
+	switch rule {
+	case "":
+		if date.Before(now) {
+			resultDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		} else {
+			resultDate = date
 		}
-	case strings.HasPrefix(repeat, "d "):
-		// Повторение через заданное количество дней
-		days, err := strconv.Atoi(strings.TrimPrefix(repeat, "d "))
-		if err != nil || days < 1 || days > 400 {
-			return "", fmt.Errorf("некорректный формат повторения: %v", repeat)
+	case "d":
+		if len(parts) != 2 {
+			return "", fmt.Errorf("Неверный формат повторения для 'd'")
 		}
-		for taskDate.Before(now) {
-			taskDate = taskDate.AddDate(0, 0, days)
+
+		daysToInt := make([]int, 0, 7)
+		days, err := strconv.Atoi(parts[1])
+		if err != nil || days <= 0 || days > 400 {
+			return "", fmt.Errorf("Неверное кол-во дней")
 		}
-	case strings.HasPrefix(repeat, "w "):
-		// Повторение по дням недели
-		daysOfWeek := strings.Split(strings.TrimPrefix(repeat, "w "), ",")
-		for {
-			for _, day := range daysOfWeek {
-				dayInt, err := strconv.Atoi(day)
-				if err != nil || dayInt < 1 || dayInt > 7 {
-					return "", fmt.Errorf("некорректный день недели: %v", day)
-				}
-				weekday := time.Weekday(dayInt - 1)
-				if taskDate.Weekday() == weekday && taskDate.After(now) {
-					return taskDate.Format("20060102"), nil
-				}
+		daysToInt = append(daysToInt, days)
+
+		if daysToInt[0] == 1 {
+			resultDate = date.AddDate(0, 0, 1)
+		} else {
+			resultDate = date.AddDate(0, 0, daysToInt[0])
+			for resultDate.Before(now) {
+				resultDate = resultDate.AddDate(0, 0, daysToInt[0])
 			}
-			taskDate = taskDate.AddDate(0, 0, 1)
 		}
-	case strings.HasPrefix(repeat, "m "):
-		// Повторение по дням месяца
-		parts := strings.Split(strings.TrimPrefix(repeat, "m "), " ")
-		if len(parts) == 0 || len(parts) > 2 {
-			return "", fmt.Errorf("некорректный формат повторения: %v", repeat)
+	case "y":
+		if len(parts) != 1 {
+			return "", fmt.Errorf("Неверный формат повторения для 'y'")
 		}
 
-		daysOfMonth := strings.Split(parts[0], ",")
-		var months []string
-		if len(parts) == 2 {
-			months = strings.Split(parts[1], ",")
-		}
-
-		for {
-			for _, day := range daysOfMonth {
-				dayInt, err := strconv.Atoi(day)
-				if err != nil || dayInt < -2 || dayInt > 31 {
-					return "", fmt.Errorf("некорректный день месяца: %v", day)
-				}
-
-				var newDate time.Time
-				if dayInt > 0 {
-					newDate = time.Date(taskDate.Year(), taskDate.Month(), dayInt, 0, 0, 0, 0, taskDate.Location())
-				} else {
-					newDate = time.Date(taskDate.Year(), taskDate.Month()+1, dayInt, 0, 0, 0, 0, taskDate.Location()).AddDate(0, 0, -1)
-				}
-
-				if len(months) > 0 {
-					for _, month := range months {
-						monthInt, err := strconv.Atoi(month)
-						if err != nil || monthInt < 1 || monthInt > 12 {
-							return "", fmt.Errorf("некорректный месяц: %v", month)
-						}
-						if newDate.Month() == time.Month(monthInt) && newDate.After(now) {
-							return newDate.Format("20060102"), nil
-						}
-					}
-				} else if newDate.After(now) {
-					return newDate.Format("20060102"), nil
-				}
-			}
-			taskDate = taskDate.AddDate(0, 1, 0)
+		resultDate = date.AddDate(1, 0, 0)
+		for resultDate.Before(now) {
+			resultDate = resultDate.AddDate(1, 0, 0)
 		}
 	default:
-		return "", fmt.Errorf("неподдерживаемый формат: %v", repeat)
+		return "", fmt.Errorf("Не поддерживаемый формат повторения")
 	}
 
-	return taskDate.Format("20060102"), nil
+	return resultDate.Format(app.FormatDate), nil
 }

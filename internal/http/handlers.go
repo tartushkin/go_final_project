@@ -18,10 +18,10 @@ func RegisterHandlers(e *echo.Echo, db app.DBHandler) {
 	e.GET("/api/nextdate", NextDateHandler(db))
 	e.POST("/api/task", AddTaskHandler(db))
 	e.GET("/api/tasks", GetTasksHandler(db))
-	e.GET("/api/task/:id", GetTaskByIDHandler(db))
-	e.PUT("/api/task/:id", UpdateTaskHandler(db))
+	e.GET("/api/task", GetTaskByIDHandler(db))
+	e.PUT("/api/task", UpdateTaskHandler(db))
 	e.POST("/api/task/done", DoneTaskHandler(db))
-	e.DELETE("/api/task/:id", DeleteTaskHandler(db))
+	e.DELETE("/api/task", DeleteTaskHandler(db))
 }
 
 // DeleteTaskHandler обрабатывает запрос на удаление задачи
@@ -100,36 +100,46 @@ func DoneTaskHandler(db app.DBHandler) echo.HandlerFunc {
 // UpdateTaskHandler обновляет параметры задачи
 func UpdateTaskHandler(db app.DBHandler) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		logrus.Debug("Начало обработчика обновления задачи")
 		// Получаем id из параметров пути
-		idStr := c.Param("id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
-		}
+		// idStr := c.QueryParam("id")
+		// logrus.Debugf("Полученный ID: %s", idStr)
+		// id, err := strconv.Atoi(idStr)
+		// if err != nil {
+		// 	logrus.Errorf("Неверный ID: %v", err)
+		// 	return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
+		// }
 		var req app.Models
 		if err := c.Bind(&req); err != nil {
 			logrus.Errorf("Ошибка десериализации JSON: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Ошибка десериализации JSON"})
 		}
 		// Устанавливаем id в структуру req
-		req.ID = id
+		if req.ID == 0 {
+			logrus.Errorf("Не указан идентификатор задачи")
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Не указан идентификатор"})
+		}
 
 		//валидация id
 		if err := validateID(strconv.Itoa(req.ID)); err != nil {
+			logrus.Errorf("Ошибка валидации ID: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		//валидация заголовка
 		if err := validateTitle(req.Title); err != nil {
+			logrus.Errorf("Ошибка валидации заголовка: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		//валидация даты
 		taskDate, err := validateDate(req.Date)
 		if err != nil {
+			logrus.Errorf("Ошибка валидации даты: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		//валидация даты повтора
 		req.Date, err = validateRepeatDate(taskDate, req.Repeat)
 		if err != nil {
+			logrus.Errorf("Ошибка валидации даты повтора: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		//обновление задачи в базе данных
@@ -140,8 +150,10 @@ func UpdateTaskHandler(db app.DBHandler) echo.HandlerFunc {
 		}
 		// была ли задача обновлена
 		if rowsAffected == 0 {
+			logrus.Warn("Задача не найдена")
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "Задача не найдена"})
 		}
+		logrus.Debug("Задача успешно обновлена")
 		//возвращаем ответ
 		return c.JSON(http.StatusOK, map[string]interface{}{})
 	}
@@ -150,7 +162,7 @@ func UpdateTaskHandler(db app.DBHandler) echo.HandlerFunc {
 // GetTaskByIDHandler возвращает параметры задачи по её идентификатору
 func GetTaskByIDHandler(db app.DBHandler) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		idStr := c.Param("id")
+		idStr := c.QueryParam("id")
 		if err := validateID(idStr); err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
