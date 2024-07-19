@@ -5,10 +5,15 @@ import (
 	"go_final_project/internal/date"
 	"net/http"
 
+	"fmt"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	t = app.FormatDate
 )
 
 func validateID(id string) error {
@@ -29,39 +34,44 @@ func validateTitle(title string) error {
 	return nil
 }
 
-func validateDate(taskDate string) (string, error) {
-	logrus.Debugf("Проверка даты: %s", taskDate)
-	if taskDate == "" {
-		logrus.Debug("Дата пустая, используется текущая дата")
-		return time.Now().Format(app.FormatDate), nil
+func validateDate(dateStr string) (time.Time, error) {
+	logrus.Debugf("Проверка формата даты: %s", dateStr)
+	if dateStr == "" {
+		logrus.Debug("Дата не указана, используем сегодняшнюю дату")
+		return time.Now().UTC(), nil
 	}
-	parsedDate, err := time.Parse(app.FormatDate, taskDate)
+	date, err := time.Parse(t, dateStr)
 	if err != nil {
-		logrus.Debug("Дата в некорректном формате")
-		return "", echo.NewHTTPError(http.StatusBadRequest, "Дата представлена в некорректном формате")
+		logrus.Errorf("Некорректная дата: %v", err)
+		return time.Time{}, fmt.Errorf("Некорректная дата: %v", err)
 	}
-	logrus.Debugf("Дата валидна: %s", parsedDate.Format(app.FormatDate))
-	return parsedDate.Format(app.FormatDate), nil
+	logrus.Debugf("Дата успешно разобрана: %v", date.UTC())
+	return date.UTC(), nil
 }
 
-func validateRepeatDate(taskDate, repeat string) (string, error) {
-	if repeat != "" {
-		parsedDate, err := time.Parse(app.FormatDate, taskDate)
+func validateRepeatDate(taskDate time.Time, repeat string) (string, error) {
+	logrus.Debugf("Проверка даты и правила повторения: дата=%v, повторение=%s", taskDate, repeat)
+	// Получаем текущую дату без времени
+
+	now := time.Now().UTC().Truncate(24 * time.Hour)
+	taskDate = taskDate.UTC().Truncate(24 * time.Hour)
+
+	if taskDate.Before(now) {
+		if repeat == "" {
+			logrus.Debugf("Дата прошедшая и нет правила повторения, используем сегодняшнюю дату, дата= %v", now)
+			return now.Format(t), nil
+		}
+
+		logrus.Debugf("Дата прошедшая, вычисление следующей даты по правилу повторения: %s", repeat)
+		nextDate, err := date.CalculateNextDate(now, taskDate.Format(t), repeat)
 		if err != nil {
-			logrus.Debug("Дата в некорректном формате для правила повтора")
-			return "", echo.NewHTTPError(http.StatusBadRequest, "Дата представлена в некорректном формате")
+			logrus.Errorf("Ошибка расчета следующей даты: %v", err)
+			return "", fmt.Errorf("Ошибка расчета следующей даты: %v", err)
 		}
-		now := time.Now().Truncate(24 * time.Hour)
-		if parsedDate.Before(now) {
-			nextDate, err := date.CalculateNextDate(now, taskDate, repeat)
-			if err != nil {
-				logrus.Debug("Некорректное правило повторения")
-				return "", echo.NewHTTPError(http.StatusBadRequest, "Некорректное правило повторения")
-			}
-			logrus.Debugf("Дата повтора валидна: %s", nextDate)
-			return nextDate, nil
-		}
+		logrus.Debugf("Следующая дата успешно рассчитана: %s", nextDate)
+		return nextDate, nil
 	}
-	logrus.Debugf("Дата повтора валидна: %s", taskDate)
-	return taskDate, nil
+
+	logrus.Debugf("Дата действительная и не требует повторения: %v", taskDate)
+	return taskDate.Format(t), nil
 }

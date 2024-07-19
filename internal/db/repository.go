@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"go_final_project/internal/app"
 	"os"
 
@@ -75,20 +76,26 @@ func (db *DB) AddTask(task app.Models) (int64, error) {
 	return id, nil
 }
 
-func (db *DB) GetTaskByID(id int) (*app.Models, error) {
+func (db *DB) GetTaskByID(id string) (*app.Models, error) {
 	var task app.Models
 	_, err := db.Select("*").From("scheduler").Where("id = ?", id).Load(&task)
 	if err != nil {
 		return nil, err
 	}
-	if task.ID == 0 {
+	if task.ID == "" {
 		return nil, dbr.ErrNotFound
 	}
 	return &task, nil
 }
 
 func (db *DB) GetTasks(search string) ([]app.Models, error) {
-	var tasks []app.Models
+	var tasks []struct {
+		ID      int    `db:"id"`
+		Date    string `db:"date"`
+		Title   string `db:"title"`
+		Comment string `db:"comment"`
+		Repeat  string `db:"repeat"`
+	}
 	query := db.Select("*").From("scheduler")
 	if search != "" {
 		query = query.Where("title LIKE ?", "%"+search+"%")
@@ -99,7 +106,19 @@ func (db *DB) GetTasks(search string) ([]app.Models, error) {
 		return nil, err
 	}
 
-	return tasks, nil
+	var result []app.Models
+	for _, task := range tasks {
+		result = append(result, app.Models{
+			ID:      fmt.Sprintf("%d", task.ID),
+			Date:    task.Date,
+			Title:   task.Title,
+			Comment: task.Comment,
+			Repeat:  task.Repeat,
+		})
+	}
+	logrus.Infof("Полученные задачи из базы данных: %+v", result)
+
+	return result, nil
 }
 
 func (db *DB) UpdateTask(task app.Models) (int64, error) {
@@ -122,7 +141,7 @@ func (db *DB) UpdateTask(task app.Models) (int64, error) {
 	return rowsAffected, nil
 }
 
-func (db *DB) DeleteTask(id int) error {
+func (db *DB) DeleteTask(id string) error {
 	_, err := db.DeleteFrom("scheduler").Where("id = ?", id).Exec()
 	return err
 }
@@ -143,4 +162,50 @@ func (db *DB) MarkTaskAsDone(task app.Models, nextDate string) error {
 		}
 	}
 	return nil
+}
+
+// GetTasksByDate возвращает задачи на определенную дату
+func (db *DB) GetTasksByDate(date string) ([]app.Models, error) {
+	query := `SELECT id, date, title, comment, repeat FROM scheduler WHERE date = ? ORDER BY date LIMIT 50`
+	rows, err := db.Query(query, date)
+	if err != nil {
+		logrus.Errorf("Ошибка выполнения запроса к базе данных: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []app.Models
+	for rows.Next() {
+		var task app.Models
+		if err := rows.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat); err != nil {
+			logrus.Errorf("Ошибка сканирования строки результата: %v", err)
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
+}
+
+// GetTasksBySearch возвращает задачи по строке поиска
+func (db *DB) GetTasksBySearch(search string) ([]app.Models, error) {
+	query := `SELECT id, date, title, comment, repeat FROM scheduler WHERE title LIKE ? OR comment LIKE ? ORDER BY date LIMIT 50`
+	rows, err := db.Query(query, fmt.Sprintf("%%%s%%", search), fmt.Sprintf("%%%s%%", search))
+	if err != nil {
+		logrus.Errorf("Ошибка выполнения запроса к базе данных: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []app.Models
+	for rows.Next() {
+		var task app.Models
+		if err := rows.Scan(&task.ID, &task.Date, &task.Title, &task.Comment, &task.Repeat); err != nil {
+			logrus.Errorf("Ошибка сканирования строки результата: %v", err)
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks, nil
 }

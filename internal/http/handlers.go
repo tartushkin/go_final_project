@@ -37,7 +37,7 @@ func DeleteTaskHandler(db app.DBHandler) echo.HandlerFunc {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
 		}
 		// Удаляем задачу из базы данных
-		err = db.DeleteTask(taskID)
+		err = db.DeleteTask(strconv.Itoa(taskID))
 		if err != nil {
 			logrus.Errorf("Ошибка удаления задачи из базы данных: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка удаления задачи из базы данных"})
@@ -47,7 +47,6 @@ func DeleteTaskHandler(db app.DBHandler) echo.HandlerFunc {
 	}
 }
 
-// DoneTaskHandler обрабатывает запрос на отметку задачи как выполненной
 func DoneTaskHandler(db app.DBHandler) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		id := c.QueryParam("id")
@@ -55,41 +54,32 @@ func DoneTaskHandler(db app.DBHandler) echo.HandlerFunc {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 
-		taskID, err := strconv.Atoi(id)
+		task, err := db.GetTaskByID(id)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
-		}
-
-		task, err := db.GetTaskByID(taskID)
-		if err != nil {
-			logrus.Errorf("Ошибка получения задачи из базы данных: %v", err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Задача не найдена"})
-		}
-
-		if task.Repeat != "" {
-			taskDate, err := time.Parse(app.FormatDate, task.Date)
-			if err != nil {
-				logrus.Errorf("Ошибка парсинга даты задачи: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка парсинга даты задачи"})
+			if err.Error() == "задача не найдена" {
+				return c.JSON(http.StatusNotFound, map[string]string{"error": "Задача не найдена"})
 			}
-
-			nextDate, err := date.CalculateNextDate(taskDate, task.Date, task.Repeat)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка получения задачи"})
+		}
+		// Проверка правила повторения
+		now := time.Now().UTC()
+		if task.Repeat == "" {
+			// Удаляем одноразовую задачу
+			err := db.MarkTaskAsDone(*task, "")
 			if err != nil {
-				logrus.Errorf("Ошибка расчета следующей даты выполнения задачи: %v", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка удаления задачи"})
+			}
+		} else {
+			// Рассчитываем следующую дату для периодической задачи
+			nextDate, err := date.CalculateNextDate(now, task.Date, task.Repeat)
+			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка расчета следующей даты выполнения задачи"})
 			}
 
-			task.Date = nextDate
-			_, err = db.UpdateTask(*task)
+			// Обновляем задачу с новой датой
+			err = db.MarkTaskAsDone(*task, nextDate)
 			if err != nil {
-				logrus.Errorf("Ошибка обновления задачи в базе данных: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка обновления задачи в базе данных"})
-			}
-		} else {
-			err := db.DeleteTask(task.ID)
-			if err != nil {
-				logrus.Errorf("Ошибка удаления задачи из базы данных: %v", err)
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка удаления задачи из базы данных"})
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка обновления задачи"})
 			}
 		}
 
@@ -101,27 +91,20 @@ func DoneTaskHandler(db app.DBHandler) echo.HandlerFunc {
 func UpdateTaskHandler(db app.DBHandler) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		logrus.Debug("Начало обработчика обновления задачи")
-		// Получаем id из параметров пути
-		// idStr := c.QueryParam("id")
-		// logrus.Debugf("Полученный ID: %s", idStr)
-		// id, err := strconv.Atoi(idStr)
-		// if err != nil {
-		// 	logrus.Errorf("Неверный ID: %v", err)
-		// 	return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
-		// }
+
 		var req app.Models
 		if err := c.Bind(&req); err != nil {
 			logrus.Errorf("Ошибка десериализации JSON: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Ошибка десериализации JSON"})
 		}
 		// Устанавливаем id в структуру req
-		if req.ID == 0 {
+		if req.ID == "" {
 			logrus.Errorf("Не указан идентификатор задачи")
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Не указан идентификатор"})
 		}
 
 		//валидация id
-		if err := validateID(strconv.Itoa(req.ID)); err != nil {
+		if err := validateID(req.ID); err != nil {
 			logrus.Errorf("Ошибка валидации ID: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
@@ -141,6 +124,9 @@ func UpdateTaskHandler(db app.DBHandler) echo.HandlerFunc {
 		if err != nil {
 			logrus.Errorf("Ошибка валидации даты повтора: %v", err)
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		if req.Date == "" || taskDate.Before(time.Now()) {
+			req.Date = time.Now().Format("20060102")
 		}
 		//обновление задачи в базе данных
 		rowsAffected, err := db.UpdateTask(req)
@@ -171,7 +157,7 @@ func GetTaskByIDHandler(db app.DBHandler) echo.HandlerFunc {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid ID"})
 		}
 
-		task, err := db.GetTaskByID(id)
+		task, err := db.GetTaskByID(strconv.Itoa(id))
 		if err != nil {
 			if err == dbr.ErrNotFound {
 				return c.JSON(http.StatusNotFound, map[string]string{"error": "Задача не найдена"})
@@ -187,12 +173,36 @@ func GetTaskByIDHandler(db app.DBHandler) echo.HandlerFunc {
 func GetTasksHandler(db app.DBHandler) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		search := c.QueryParam("search")
+		var tasks []app.Models
+		var err error
 
-		tasks, err := db.GetTasks(search)
-		if err != nil {
-			logrus.Errorf("Ошибка получения задач из базы данных: %v", err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка получения задач из базы данных"})
+		if search != "" {
+			// Проверяем, является ли строка поиска датой
+			if parsedDate, err := time.Parse(app.UserDateFormat, search); err == nil {
+				// Если это дата, то ищем задачи по дате
+				tasks, err = db.GetTasksByDate(parsedDate.Format(app.FormatDate))
+				if err != nil {
+					logrus.Errorf("Ошибка получения задач по дате из базы данных: %v", err)
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка получения задач по дате из базы данных"})
+				}
+			} else {
+				// Если это не дата, то ищем задачи по строке поиска в заголовке или комментарии
+				tasks, err = db.GetTasksBySearch(search)
+				if err != nil {
+					logrus.Errorf("Ошибка получения задач по строке поиска из базы данных: %v", err)
+					return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка получения задач по строке поиска из базы данных"})
+				}
+			}
+		} else {
+			// Если нет строки поиска, возвращаем все задачи
+			tasks, err = db.GetTasks("")
+			if err != nil {
+				logrus.Errorf("Ошибка получения задач из базы данных: %v", err)
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Ошибка получения задач из базы данных"})
+			}
 		}
+
+		logrus.Infof("Полученные задачи из базы данных: %+v", tasks)
 
 		// Сортировка задач по дате
 		sort.Slice(tasks, func(i, j int) bool {
@@ -208,6 +218,8 @@ func GetTasksHandler(db app.DBHandler) echo.HandlerFunc {
 		if tasks == nil {
 			tasks = []app.Models{}
 		}
+
+		logrus.Infof("Задачи после сортировки и ограничения: %+v", tasks)
 
 		return c.JSON(http.StatusOK, map[string]interface{}{"tasks": tasks})
 	}
@@ -260,16 +272,16 @@ func NextDateHandler(db app.DBHandler) echo.HandlerFunc {
 		repeatStr := c.QueryParam("repeat")
 
 		// Валидируем параметр now
-		nowTimeString, err := validateDate(nowStr)
+		nowTime, err := validateDate(nowStr)
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Некорректная дата now"})
 		}
 
-		// Преобразуем nowTimeString в time.Time
-		nowTime, err := time.Parse(app.FormatDate, nowTimeString)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Некорректная дата now"})
-		}
+		// // Преобразуем nowTimeString в time.Time
+		// nowTime, err := time.Parse(app.FormatDate, nowTimeString)
+		// if err != nil {
+		// 	return c.JSON(http.StatusBadRequest, map[string]string{"error": "Некорректная дата now"})
+		// }
 
 		// Вычисляем следующую дату
 		nextDate, err := date.CalculateNextDate(nowTime, dateStr, repeatStr)

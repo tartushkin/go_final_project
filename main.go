@@ -23,7 +23,7 @@ func main() {
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetOutput(os.Stdout)
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 
 	// Получаем значение порта из переменной окружения TODO_PORT
 	port := os.Getenv("TODO_PORT")
